@@ -25,91 +25,84 @@
 
 ---
 
-## Описание
+## Схема базы данных
 
-Сервис позволяет:
-- регистрировать и авторизовывать пользователей
-- добавлять книги
-- искать пользователей и книги
-- выдавать книги пользователям
-- возвращать книги
+В проекте используется реляционная база данных PostgreSQL.  
+Схема включает три таблицы:
 
-Данные хранятся в памяти (in-memory).
+### users
+Хранит данные пользователей библиотеки:
+- `id` - первичный ключ;
+- `login` - уникальный логин;
+- `password_hash` - пароль пользователя;
+- `first_name` - имя;
+- `last_name` - фамилия;
+- `created_at` - дата создания записи.
 
-## Сущности
+### books
+Хранит данные о книгах:
+- `id` - первичный ключ;
+- `title` - название книги;
+- `author` - автор;
+- `publication_year` - год издания;
+- `available` - признак доступности книги;
+- `created_at` - дата добавления записи.
 
-- User — пользователь
-- Book — книга
-- Loan — выдача книги
+### loans
+Хранит информацию о выдачах:
+- `id` - первичный ключ;
+- `user_id` - внешний ключ на таблицу `users`;
+- `book_id` - внешний ключ на таблицу `books`;
+- `issued_at` - дата выдачи;
+- `returned_at` - дата возврата;
+- `returned` - признак возврата книги.
 
-## Endpoints
+## Ограничения целостности
 
-### Auth
-- POST /api/v1/auth/register — регистрация пользователя
-- POST /api/v1/auth/login — логин и получение JWT
+В базе данных используются следующие ограничения:
+- `PRIMARY KEY` для всех таблиц;
+- `FOREIGN KEY` для связей между таблицами;
+- `NOT NULL` для обязательных полей;
+- `UNIQUE` для логина пользователя;
+- `CHECK` для проверки корректности данных.
 
-### Users
-- POST /api/v1/users — создание пользователя
-- GET /api/v1/users/by-login/{login} — поиск по логину
-- GET /api/v1/users/search — поиск по имени и фамилии
+Дополнительно в таблице `loans` реализована защита от двойной активной выдачи одной и той же книги.
 
-### Books
-- POST /api/v1/books — добавить книгу (требует JWT)
-- GET /api/v1/books/search — поиск книг
+## Индексы
 
-### Loans
-- POST /api/v1/loans — выдать книгу (требует JWT)
-- GET /api/v1/users/{userId}/loans — список выдач пользователя
-- PATCH /api/v1/loans/{loanId}/return — вернуть книгу (требует JWT)
+Для ускорения работы запросов созданы индексы:
+- по `login` для быстрого поиска пользователя;
+- по `user_id` и `book_id` в таблице `loans`;
+- по `(user_id, issued_at DESC)` для быстрого получения списка выдач пользователя;
+- trigram-индексы по `lower(title)` и `lower(author)` для поиска книг по части строки;
+- trigram-индексы по `lower(first_name)` и `lower(last_name)` для поиска пользователей по маске;
+- частичный уникальный индекс на активные выдачи книги.
 
-### Service
-- GET /metrics — метрики
-- GET /swagger.yaml — OpenAPI спецификация
+## Оптимизация запросов
 
-## Аутентификация
+Для анализа использовались команды `EXPLAIN (ANALYZE, BUFFERS)`.
 
-Используется JWT.
+Оптимизация рассматривалась для следующих запросов:
+- поиск пользователя по логину;
+- получение списка выдач пользователя;
+- поиск книг по названию;
+- поиск книг по автору;
+- поиск пользователей по имени и фамилии.
 
-После логина возвращается токен:
+Подробное описание приведено в файле `optimization.md`.
 
-```json
-{
-  "token": "..."
-}
-```
+## Партиционирование
 
-Передаётся в заголовке:
+Для текущего учебного проекта партиционирование не требуется, так как объём данных небольшой.
 
-Authorization: Bearer <token>
+Если система будет расти, таблицу `loans` можно партиционировать по полю `issued_at`, например по месяцам.
 
-Защищённые endpoint'ы:
-- создание книги
-- создание выдачи
-- возврат книги
+## Подключение API к базе данных
 
-## Статус-коды
+API из предыдущей домашней работы подключено к PostgreSQL.  
+После запуска через Docker Compose сервис работает уже не с in-memory хранилищем, а с реальной реляционной базой данных.
 
-- 200 OK — успешный запрос
-- 201 Created — ресурс создан
-- 400 Bad Request — неверные данные
-- 401 Unauthorized — нет токена или неверный токен
-- 404 Not Found — ресурс не найден
-- 409 Conflict — конфликт (например, книга уже выдана)
-
-## Документация API
-
-- файл: openapi.yaml
-- endpoint: GET /swagger.yaml
-
-## Переменные окружения
-
-- PORT — порт сервера (по умолчанию 8080)
-- LOG_LEVEL — уровень логирования
-- JWT_SECRET — секрет для JWT
-
-## Запуск через Docker
-
-Сборка проекта:
+Проверенные примеры запросов:
 
 ```bash
 curl "http://localhost:8080/api/v1/users/by-login/reader01"
@@ -133,505 +126,16 @@ docker compose up --build
 ### Остановка и удаление контейнеров
 
 ```bash
-bash tests/run_api_tests.sh
+docker compose down -v
 ```
 
----
-
-## Что проверяют тесты
-
-Тесты покрывают основные сценарии работы API:
-
-- регистрация пользователя
-- проверка ошибки при повторной регистрации
-- логин и получение JWT токена
-- ошибка при неверном пароле
-- создание пользователя
-- поиск пользователя (по логину и по имени)
-- добавление книги (с токеном и без)
-- поиск книги
-- создание выдачи книги
-- запрет повторной выдачи той же книги
-- получение списка выдач пользователя
-- возврат книги
-- запрет повторного возврата
-- обработка ошибок (404, 401, 409)
-
-Также тесты проверяют:
-- корректные HTTP статус-коды
-- корректные JSON-ответы
-- работу авторизации через JWT
-
----
-
-## Пример успешного запуска тестов
-
-```bash
-$ bash tests/run_api_tests.sh
-
-==================================================
-==> 1. Register first user
-==================================================
-Request:
-  Method: POST
-  URL:    http://localhost:8080/api/v1/auth/register
-  Token:  no
-  Body:
-    {
-        "login":  "reader_auto_1774680823",
-        "password":  "secret123",
-        "firstName":  "Ivan",
-        "lastName":  "Petrov"
-    }
-
-Response:
-  Status: 201
-  Body:
-    {
-        "firstName":  "Ivan",
-        "id":  1,
-        "lastName":  "Petrov",
-        "login":  "reader_auto_1774680823"
-    }
-
-
-==================================================
-==> 2. Register duplicate user should fail
-==================================================
-Request:
-  Method: POST
-  URL:    http://localhost:8080/api/v1/auth/register
-  Token:  no
-  Body:
-    {
-        "login":  "reader_auto_1774680823",
-        "password":  "secret123",
-        "firstName":  "Ivan",
-        "lastName":  "Petrov"
-    }
-
-Response:
-  Status: 409
-  Body:
-    {
-        "error":  "user already exists"
-    }
-
-
-==================================================
-==> 3. Login first user
-==================================================
-Request:
-  Method: POST
-  URL:    http://localhost:8080/api/v1/auth/login
-  Token:  no
-  Body:
-    {
-        "login":  "reader_auto_1774680823",
-        "password":  "secret123"
-    }
-
-Response:
-  Status: 200
-  Body:
-    {
-        "token":  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3NzQ2ODA4MjcuMzc0NDcsImxvZ2luIjoicmVhZGVyX2F1dG9fMTc3NDY4MDgyMyIsInN1YiI6InJlYWRlcl9hdXRvXzE3NzQ2ODA4MjMiLCJ1c2VySWQiOjF9.gjSP-q84o8Iq6ETOHIhSYdqm4IGCpe85BOn5xRjgMFo"
-    }
-
-
-==================================================
-==> 4. Login with wrong password should fail
-==================================================
-Request:
-  Method: POST
-  URL:    http://localhost:8080/api/v1/auth/login
-  Token:  no
-  Body:
-    {
-        "login":  "reader_auto_1774680823",
-        "password":  "wrong_password"
-    }
-
-Response:
-  Status: 401
-  Body:
-    {
-        "error":  "invalid login or password"
-    }
-
-
-==================================================
-==> 5. Create second user through /api/v1/users
-==================================================
-Request:
-  Method: POST
-  URL:    http://localhost:8080/api/v1/users
-  Token:  no
-  Body:
-    {
-        "login":  "reader2_auto_1774680823",
-        "password":  "pass456",
-        "firstName":  "Anna",
-        "lastName":  "Smirnova"
-    }
-
-Response:
-  Status: 201
-  Body:
-    {
-        "firstName":  "Anna",
-        "id":  2,
-        "lastName":  "Smirnova",
-        "login":  "reader2_auto_1774680823"
-    }
-
-
-==================================================
-==> 6. Find user by login
-==================================================
-Request:
-  Method: GET
-  URL:    http://localhost:8080/api/v1/users/by-login/reader2_auto_1774680823
-  Token:  no
-  Body: <empty>
-
-Response:
-  Status: 200
-  Body:
-    {
-        "firstName":  "Anna",
-        "id":  2,
-        "lastName":  "Smirnova",
-        "login":  "reader2_auto_1774680823"
-    }
-
-
-==================================================
-==> 7. Search users by first/last name
-==================================================
-Request:
-  Method: GET
-  URL:    http://localhost:8080/api/v1/users/search?firstName=Ann&lastName=Smir
-  Token:  no
-  Body: <empty>
-
-Response:
-  Status: 200
-  Body:
-    {
-        "count":  1,
-        "items":  [
-                      {
-                          "firstName":  "Anna",
-                          "id":  2,
-                          "lastName":  "Smirnova",
-                          "login":  "reader2_auto_1774680823"
-                      }
-                  ]
-    }
-
-
-==================================================
-==> 8. Create book without token should fail
-==================================================
-Request:
-  Method: POST
-  URL:    http://localhost:8080/api/v1/books
-  Token:  no
-  Body:
-    {
-        "title":  "War and Peace",
-        "author":  "Leo Tolstoy",
-        "year":  1869
-    }
-
-Response:
-  Status: 401
-  Body:
-    {
-        "error":  "missing or invalid bearer token"
-    }
-
-
-==================================================
-==> 9. Create book with token
-==================================================
-Request:
-  Method: POST
-  URL:    http://localhost:8080/api/v1/books
-  Token:  yes
-  Body:
-    {
-        "title":  "War and Peace",
-        "author":  "Leo Tolstoy",
-        "year":  1869
-    }
-
-Response:
-  Status: 201
-  Body:
-    {
-        "author":  "Leo Tolstoy",
-        "available":  true,
-        "id":  1,
-        "title":  "War and Peace",
-        "year":  1869
-    }
-
-
-==================================================
-==> 10. Search book by title
-==================================================
-Request:
-  Method: GET
-  URL:    http://localhost:8080/api/v1/books/search?title=War
-  Token:  no
-  Body: <empty>
-
-Response:
-  Status: 200
-  Body:
-    {
-        "count":  1,
-        "items":  [
-                      {
-                          "author":  "Leo Tolstoy",
-                          "available":  true,
-                          "id":  1,
-                          "title":  "War and Peace",
-                          "year":  1869
-                      }
-                  ]
-    }
-
-
-==================================================
-==> 11. Search book by author
-==================================================
-Request:
-  Method: GET
-  URL:    http://localhost:8080/api/v1/books/search?author=Tolstoy
-  Token:  no
-  Body: <empty>
-
-Response:
-  Status: 200
-  Body:
-    {
-        "count":  1,
-        "items":  [
-                      {
-                          "author":  "Leo Tolstoy",
-                          "available":  true,
-                          "id":  1,
-                          "title":  "War and Peace",
-                          "year":  1869
-                      }
-                  ]
-    }
-
-
-==================================================
-==> 12. Create loan without token should fail
-==================================================
-Request:
-  Method: POST
-  URL:    http://localhost:8080/api/v1/loans
-  Token:  no
-  Body:
-    {
-        "userId":  2,
-        "bookId":  1,
-        "issuedAt":  "2026-03-28"
-    }
-
-Response:
-  Status: 401
-  Body:
-    {
-        "error":  "missing or invalid bearer token"
-    }
-
-
-==================================================
-==> 13. Create loan with token
-==================================================
-Request:
-  Method: POST
-  URL:    http://localhost:8080/api/v1/loans
-  Token:  yes
-  Body:
-    {
-        "userId":  2,
-        "bookId":  1,
-        "issuedAt":  "2026-03-28"
-    }
-
-Response:
-  Status: 201
-  Body:
-    {
-        "bookId":  1,
-        "id":  1,
-        "issuedAt":  "2026-03-28",
-        "returned":  false,
-        "returnedAt":  "",
-        "userId":  2
-    }
-
-
-==================================================
-==> 14. Create second loan for same book should fail
-==================================================
-Request:
-  Method: POST
-  URL:    http://localhost:8080/api/v1/loans
-  Token:  yes
-  Body:
-    {
-        "userId":  1,
-        "bookId":  1,
-        "issuedAt":  "2026-03-28"
-    }
-
-Response:
-  Status: 409
-  Body:
-    {
-        "error":  "book is already issued"
-    }
-
-
-==================================================
-==> 15. Get loans of user
-==================================================
-Request:
-  Method: GET
-  URL:    http://localhost:8080/api/v1/users/2/loans
-  Token:  no
-  Body: <empty>
-
-Response:
-  Status: 200
-  Body:
-    {
-        "count":  1,
-        "items":  [
-                      {
-                          "bookId":  1,
-                          "id":  1,
-                          "issuedAt":  "2026-03-28",
-                          "returned":  false,
-                          "returnedAt":  "",
-                          "userId":  2
-                      }
-                  ]
-    }
-
-
-==================================================
-==> 16. Return loan without token should fail
-==================================================
-Request:
-  Method: PATCH
-  URL:    http://localhost:8080/api/v1/loans/1/return
-  Token:  no
-  Body:
-    {
-        "returnedAt":  "2026-04-05"
-    }
-
-Response:
-  Status: 401
-  Body:
-    {
-        "error":  "missing or invalid bearer token"
-    }
-
-
-==================================================
-==> 17. Return loan with token
-==================================================
-Request:
-  Method: PATCH
-  URL:    http://localhost:8080/api/v1/loans/1/return
-  Token:  yes
-  Body:
-    {
-        "returnedAt":  "2026-04-05"
-    }
-
-Response:
-  Status: 200
-  Body:
-    {
-        "bookId":  1,
-        "id":  1,
-        "issuedAt":  "2026-03-28",
-        "returned":  true,
-        "returnedAt":  "2026-04-05",
-        "userId":  2
-    }
-
-
-==================================================
-==> 18. Return same loan again should fail
-==================================================
-Request:
-  Method: PATCH
-  URL:    http://localhost:8080/api/v1/loans/1/return
-  Token:  yes
-  Body:
-    {
-        "returnedAt":  "2026-04-05"
-    }
-
-Response:
-  Status: 409
-  Body:
-    {
-        "error":  "book already returned"
-    }
-
-
-==================================================
-==> 19. User not found
-==================================================
-Request:
-  Method: GET
-  URL:    http://localhost:8080/api/v1/users/by-login/user_that_does_not_exist_12345
-  Token:  no
-  Body: <empty>
-
-Response:
-  Status: 404
-  Body:
-    {
-        "error":  "user not found"
-    }
-
-
-==================================================
-==> 20. Loan not found
-==================================================
-Request:
-  Method: PATCH
-  URL:    http://localhost:8080/api/v1/loans/999999/return
-  Token:  yes
-  Body:
-    {
-        "returnedAt":  "2026-04-05"
-    }
-
-Response:
-  Status: 404
-  Body:
-    {
-        "error":  "loan not found"
-    }
-
-
-==================================================
-ALL TESTS PASSED
-==================================================
-```
+## Состав файлов
+
+В репозитории представлены следующие файлы:
+- `schema.sql` - создание таблиц, ограничений и индексов;
+- `data.sql` - тестовые данные;
+- `queries.sql` - SQL-запросы для операций системы;
+- `optimization.md` - описание оптимизации запросов;
+- `README.md` - описание проекта;
+- `Dockerfile` - сборка API;
+- `docker-compose.yaml` - запуск API и PostgreSQL.
