@@ -44,10 +44,7 @@ namespace
             prio = static_cast<Message::Priority>(Message::PRIO_FATAL + 1);
         Logger::root().setLevel(prio);
     }
-<<<<<<< HEAD
-=======
 
->>>>>>> 4d6bb9b039b9a87671d30bb4d0ed499d549249b2
 }
 
 namespace handlers
@@ -56,10 +53,7 @@ namespace handlers
     DummyCounter *g_httpErrors = nullptr;
     DummyHistogram *g_httpDuration = nullptr;
     std::string g_jwtSecret;
-<<<<<<< HEAD
-=======
 
->>>>>>> 4d6bb9b039b9a87671d30bb4d0ed499d549249b2
 }
 
 class ServerApp : public ServerApplication
